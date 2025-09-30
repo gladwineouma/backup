@@ -280,7 +280,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
 class SavingsAccountViewSet(viewsets.ModelViewSet):
     queryset = SavingsAccount.objects.select_related("member").all()
     serializer_class = SavingsAccountSerializer
-    lookup_field = "saving_id"
+    lookup_field = "id"
 
 
     @action(detail=False, methods=['post'])
