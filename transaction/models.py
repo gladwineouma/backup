@@ -56,13 +56,12 @@ class Transaction(models.Model):
         related_name='transactions',
         help_text="Pension provider for B2B transfers"
     ) 
-    description = models.TextField(blank=True, null=True, help_text="Human-readable transaction note")  # 👈 ADDED FIELD
+    description = models.TextField(blank=True, null=True, help_text="Human-readable transaction note")
     updated_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def clean(self):
-        """Validate required fields based on account_type"""
         if self.account_type in ['savings', 'loan_repayment', 'pension_contribution'] and not self.member:
             raise ValidationError("Member is required for savings, loan repayment, or pension contribution.")
         if self.account_type == 'loan_disbursement' and not self.manager:

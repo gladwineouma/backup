@@ -16,6 +16,9 @@ from .serializers import (
     PensionAccountSerializer,
     GuarantorHistorySerializer,
 )
+
+from rest_framework.views import APIView
+from .serializers import LoanApplicationSerializer
 from rest_framework.permissions import AllowAny
 from rest_framework.authentication import BasicAuthentication
 from rest_framework import viewsets, status, generics, permissions
@@ -170,12 +173,32 @@ def expire_guarantors_manual(GenericAPIView):
 
 class GuarantorHistoryViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = GuarantorHistorySerializer
-    permission_classes = [AllowAny]  # Remove authentication requirement
+    permission_classes = [AllowAny]
 
     def get_queryset(self):
-        # You can choose whether to filter by user here or return all records
-        return Guarantor.objects.all().order_by('-created_at')
+        member_id = self.request.query_params.get('member_id')
+        queryset = Guarantor.objects.all().order_by('-created_at')
+        if member_id:
+            queryset = queryset.filter(member__id=member_id)
+        return queryset
 
+
+
+class LoanApplicationViewSet(viewsets.ModelViewSet):
+    permission_classes = [AllowAny]
+    queryset = LoanAccount.objects.all()
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return LoanApplicationSerializer
+        return LoanAccountSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        loan = serializer.save()
+        output_serializer = LoanAccountSerializer(loan)
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
 
 class LoanRepaymentViewSet(viewsets.ModelViewSet):
     queryset = LoanRepayment.objects.all()

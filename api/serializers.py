@@ -26,7 +26,6 @@ class GuarantorSerializer(serializers.ModelSerializer):
         model = Guarantor
         fields = ['guarantor_id', 'loan', 'user_identifier', 'guarantor_name', 'status']
 
-
     def validate_user_identifier(self, value):
         user = User.objects.filter(phone_number=value).first()
         if not user:
@@ -37,10 +36,8 @@ class GuarantorSerializer(serializers.ModelSerializer):
     def validate(self, data):
         user = self.context.get('user')
         loan = data.get('loan')
-
         if Guarantor.objects.filter(loan=loan, member=user).exists():
             raise serializers.ValidationError("This user is already a guarantor for this loan.")
-
         count = Guarantor.objects.filter(loan=loan).count()
         if count >= 2:
             raise serializers.ValidationError("Cannot add more than two guarantors for a loan.")
@@ -80,8 +77,32 @@ class GuarantorHistorySerializer(serializers.ModelSerializer):
     def get_guarantor_name(self, obj):
         return f"{obj.member.first_name} {obj.member.last_name}"
 
+class LoanRepaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LoanRepayment
+        fields = '__all__'
 
+    def validate_loan_amount_repaid(self, value):
+        loan = self.initial_data.get('loan')
+        try:
+            loan_instance = LoanAccount.objects.get(pk=loan)
+        except LoanAccount.DoesNotExist:
+            raise serializers.ValidationError("Invalid loan specified.")
+        if value > loan_instance.outstanding_balance:
+            raise serializers.ValidationError("Repayment amount exceeds outstanding loan balance.")
+        return value
 
+    def create(self, validated_data):
+        repayment = super().create(validated_data)
+        loan = repayment.loan
+        loan.total_loan_repaid += repayment.loan_amount_repaid
+        loan.save()
+        if loan.outstanding_balance < 0:
+            loan.outstanding_balance = 0
+        if loan.outstanding_balance == 0:
+            loan.loan_status = 'Paid'
+        loan.save()
+        return repayment
 
 class LoanAccountSerializer(serializers.ModelSerializer):
     guarantor_id = serializers.ReadOnlyField()
@@ -92,7 +113,11 @@ class LoanAccountSerializer(serializers.ModelSerializer):
 
     member_first_name = serializers.SerializerMethodField()
     member_last_name = serializers.SerializerMethodField()
+    member_phone_number = serializers.SerializerMethodField()
     status = serializers.CharField(source='loan_status', read_only=True)
+
+    guarantors = GuarantorSerializer(many=True, read_only=True)
+    repayments = LoanRepaymentSerializer(many=True, read_only=True)
 
     class Meta:
         model = LoanAccount
@@ -101,6 +126,7 @@ class LoanAccountSerializer(serializers.ModelSerializer):
             'member',
             'member_first_name',
             'member_last_name',
+            'member_phone_number',
             'requested_amount',
             'loan_reason',
             'guarantor_id',
@@ -116,23 +142,25 @@ class LoanAccountSerializer(serializers.ModelSerializer):
             'approved_at',
             'disbursed_at',
             'repayment_due_date',
-            'transaction_id_b2c'
+            'transaction_id_b2c',
+            'guarantors',
+            'repayments',
         ]
-        read_only_fields = ['interest_rate', 'total_interest', 'total_repayment', 'outstanding_balance']
+        read_only_fields = [
+            'interest_rate', 'total_interest', 'total_repayment', 'outstanding_balance',
+            'guarantors', 'repayments'
+        ]
 
     def validate(self, data):
         member = data.get('member')
         requested_amount = data.get('requested_amount')
-
         try:
             savings = SavingsAccount.objects.get(member=member)
         except SavingsAccount.DoesNotExist:
             raise serializers.ValidationError("You must have a savings account to apply for a loan.")
-
         max_loan = savings.member_account_balance * 3
         if requested_amount > max_loan:
             raise serializers.ValidationError(f"Loan amount cannot exceed 3x your savings balance (KES {max_loan:.2f}).")
-
         return data
 
     def get_member_first_name(self, obj):
@@ -141,15 +169,15 @@ class LoanAccountSerializer(serializers.ModelSerializer):
     def get_member_last_name(self, obj):
         return obj.member.last_name
 
+    def get_member_phone_number(self, obj):    
+        return obj.member.phone_number 
+
     def get_total_interest(self, obj):
         years = Decimal(obj.timeline_months) / Decimal('12')
         return (obj.requested_amount * obj.interest_rate * years) / Decimal('100')
 
     def get_total_repayment(self, obj):
         return obj.requested_amount + self.get_total_interest(obj)
-
-
-
 
 class LoanApplicationSerializer(serializers.Serializer):
     loan = LoanAccountSerializer()
@@ -177,69 +205,16 @@ class LoanApplicationSerializer(serializers.Serializer):
             except SavingsAccount.DoesNotExist:
                 raise serializers.ValidationError("You must have a savings account to apply for a loan.")
         return value
+
     def create(self, validated_data):
         loan_data = validated_data.pop('loan')
         guarantor_data = validated_data.pop('guarantors')
-
         loan_serializer = LoanAccountSerializer(data=loan_data)
         loan_serializer.is_valid(raise_exception=True)
         loan = loan_serializer.save(loan_status='DRAFT')
-
         for guarantor in guarantor_data:
             Guarantor.objects.create(loan=loan, **guarantor)
         return loan
-
-    def create(self, validated_data):
-        loan_data = validated_data.pop('loan')
-        guarantor_data = validated_data.pop('guarantors')
-
-        loan_serializer = LoanAccountSerializer(data=loan_data)
-        loan_serializer.is_valid(raise_exception=True)
-        loan = loan_serializer.save(loan_status='DRAFT')
-
-        for guarantor in guarantor_data:
-            Guarantor.objects.create(loan=loan, **guarantor)
-        return Loan
-
-
-class LoanRepaymentSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = LoanRepayment
-        fields = '__all__'
-
-    def validate_loan_amount_repaid(self, value):
-        loan = self.initial_data.get('loan')
-        # Fetch loan instance
-        try:
-            loan_instance = LoanAccount.objects.get(pk=loan)
-        except LoanAccount.DoesNotExist:
-            raise serializers.ValidationError("Invalid loan specified.")
-
-        if value > loan_instance.outstanding_balance:
-            raise serializers.ValidationError("Repayment amount exceeds outstanding loan balance.")
-        return value
-
-    def create(self, validated_data):
-        repayment = super().create(validated_data)
-        loan = repayment.loan
-        
-    
-        loan.total_loan_repaid += repayment.loan_amount_repaid
-        loan.total_loan_repaid += repayment.loan_amount_repaid
-        loan.save()
-
-        
-        
-        if loan.outstanding_balance < 0:
-            loan.outstanding_balance = 0
-        
-        
-        if loan.outstanding_balance == 0:
-            loan.loan_status = 'Paid' 
-
-        loan.save()
-        return repayment
-
 
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
@@ -632,7 +607,6 @@ class SavingsContributionSerializer(serializers.ModelSerializer):
         return obj.completed_at if obj.completed_at else obj.created_at
 
     def create(self, validated_data):
-        # Ensure saving is set or created
         member = validated_data['member']
         saving = validated_data.get('saving')
         if not saving:

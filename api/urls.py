@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import LoanAccountViewSet, GuarantorViewSet, LoanRepaymentViewSet
+from .views import LoanAccountViewSet, GuarantorViewSet, LoanRepaymentViewSet, LoanApplicationViewSet
 from .views import TransactionViewSet 
 from . import views
 from .views import PensionViewSet, PolicyViewSet,PensionAccountViewSet,  GuarantorHistoryViewSet 
@@ -22,6 +22,8 @@ router.register(r"savingsContributions", views.SavingsContributionViewSet, basen
 router.register(r"vslaAccounts", views.VSLAAccountViewSet, basename="vslaaccount")
 router.register(r"pensionAccounts", views.PensionAccountViewSet, basename="pensionaccount")
 router.register(r'guarantorHistory', GuarantorHistoryViewSet, basename='guarantorhistory')
+router.register(r'loanApplication', LoanApplicationViewSet, basename='loanapplication')
+
 
 
 
