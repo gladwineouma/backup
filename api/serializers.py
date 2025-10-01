@@ -16,6 +16,9 @@ from datetime import timedelta
 from django.conf import settings
 from pension.models import PensionAccount, PensionProvider
 from decimal import Decimal, InvalidOperation
+from django.utils.timezone import now
+from django.db.models import Sum
+from decimal import Decimal
 
 class GuarantorSerializer(serializers.ModelSerializer):
     guarantor_id = serializers.ReadOnlyField()
@@ -52,8 +55,12 @@ class GuarantorSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
-        ret['guarantor_name'] = f"{instance.member.first_name} {instance.member.last_name}"
+        ret['guarantor_name'] = f"{instance.member.first_name} {instance.member.last_name}" 
+        ret['borrower_name'] = f"{instance.loan.member.first_name} {instance.loan.member.last_name}"
+        ret['requested_amount'] = instance.loan.requested_amount
+        ret['loan_reason'] = instance.loan.loan_reason or ""
         return ret
+
 
 class GuarantorHistorySerializer(serializers.ModelSerializer):
     guarantor_name = serializers.SerializerMethodField()
@@ -391,6 +398,7 @@ class TransactionSerializer(serializers.ModelSerializer):
 
 class SavingsAccountSerializer(serializers.ModelSerializer):
     progress_percentage = serializers.SerializerMethodField()
+    monthly_progress_percentage = serializers.SerializerMethodField()
     savings_target = serializers.SerializerMethodField()
     progress_tier = serializers.SerializerMethodField()
     member_first_name = serializers.SerializerMethodField()
@@ -415,6 +423,7 @@ class SavingsAccountSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'progress_percentage',
+            'monthly_progress_percentage',
             'savings_target',
             'progress_tier',
             'pension_percentage',
@@ -424,30 +433,43 @@ class SavingsAccountSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_progress_percentage(self, obj):
-        monthly_target = 1000.0
+        target = Decimal('1000.0')
+        balance = Decimal(obj.member_account_balance)
+
+        if target == 0:
+            return 0.0
+
+        percentage = (balance / target) * Decimal('100')
+        return round(float(percentage), 2)
+
+    def get_monthly_progress_percentage(self, obj):
+        target = Decimal('1000.0')
         current_date = now()
         start_of_month = current_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-        
         monthly_savings = SavingsContribution.objects.filter(
             member=obj.member,
             created_at__gte=start_of_month
-        ).aggregate(total=Sum('amount'))['total'] or 0.0
+        ).aggregate(total=Sum('contributed_amount'))['total'] or Decimal('0.0')
 
-        if monthly_target == 0:
+        if target == 0:
             return 0.0
 
-        percentage = (monthly_savings / monthly_target) * 100
-        return round(percentage, 2)
+        percentage = (monthly_savings / target) * Decimal('100')
+        if percentage > 100:
+            percentage = Decimal('100')
+        return round(float(percentage), 2)
+
     def get_savings_target(self, obj):
-        return 1000.00 
+        return 1000.0
 
     def get_progress_tier(self, obj):
         percentage = self.get_progress_percentage(obj)
+
         if percentage >= 500:
             return "Super Saver"
         elif percentage >= 300:
-            return  "Power Saver"
+            return "Power Saver"
         elif percentage >= 200:
             return "Strong Saver"
         elif percentage >= 100:
@@ -489,7 +511,6 @@ class SavingsAccountSerializer(serializers.ModelSerializer):
             return pension_account.total_pension_amount
         except PensionAccount.DoesNotExist:
             return None
-
 
 
 
