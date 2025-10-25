@@ -1,1 +1,1 @@
-web: gunicorn malipoflex.wsgi -log-file -
+web: gunicorn malipoflex.wsgi --bind 0.0.0.0:$PORT --log-file -
